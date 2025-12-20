@@ -1,270 +1,320 @@
-# Information Ecosystem Research & Analysis
+# Information Ecosystem — Design Document
+
+> **Last Updated:** December 2024  
+> **Status:** Active Development — MVP visualization complete
+
+---
 
 ## Executive Summary
 
-The information ecosystem should combine graph databases, workflow orchestration, and knowledge management systems to create dynamic, AI-powered information networks. Modern solutions emphasize TypeScript-first development, visual workflow building, and semantic knowledge graphs.
+The Information Ecosystem is a **brain-inspired graph system** that models information from multiple applications (Trello, Notion, Gmail, etc.) as interconnected entities. An AI agent uses this graph to understand workflows, detect patterns, and generate automations.
 
-## Recommended Technology Stack
+**Core Insight:** We model the *information itself* (entities), not the events. Events are signals that tell us where information exists and how entities relate to each other.
 
-### 🧠 Knowledge Graphs & Graph Databases
+---
 
-#### Primary: Neo4j with Drivine (TypeScript ORM)
-**Why:** Industry-leading graph database with excellent TypeScript integration and O(1) traversal performance.
+## 🧠 Core Philosophy
 
-- **Neo4j**: https://neo4j.com/
-- **Drivine**: https://neo4j.com/blog/auradb/introducing-drivine-graph-database-client-for-node-js-and-typescript/
-- **Key Features**:
-  - TypeScript-first graph ORM with light-weight object mapping
-  - Scales to hundreds/thousands of transactions per second
-  - Support for multiple graph databases simultaneously
-  - Sweet-spot abstraction level for flexible graph-powered systems
+### Entities vs Events
 
-#### Alternative: TigerGraph with TypeScript SDK
-**Why:** High-performance analytics and real-time graph queries.
+| Concept | Role | Example |
+|---------|------|---------|
+| **Entity Nodes** | The actual information | Cards, boards, lists, members, attachments, documents |
+| **Events** | Signals that create/strengthen edges | "Card moved", "attachment added", "due date set" |
 
-- **Use Case**: When you need massive scale analytics on graph data
-- **Features**: Sub-second query response times, parallel processing
+**Key Decision:** Events are NOT nodes. They inform the graph by:
+1. Revealing which entities exist
+2. Creating edges between entities
+3. Strengthening edges through repeated co-occurrence (Hebbian learning)
 
-### 🔄 Workflow Orchestration
+### Explicit ID-Based Mapping
 
-#### Primary: Windmill
-**Why:** Fastest open-source workflow engine with native TypeScript support.
+**Decision:** Each unique ID from a source application = one unique node.
 
-- **Website**: https://www.windmill.dev/
-- **GitHub**: https://github.com/windmill-labs/windmill
-- **Key Features**:
-  - TypeScript, Python, Go, PHP, Rust, Bash, SQL support
-  - Auto-generated UI for workflows
-  - Self-hostable with cloud option
-  - Low-code workflow composition
+- `trello:card:abc123` and `trello:card:def456` are separate nodes even if they have the same name
+- No conceptual merging or deduplication (for now)
+- This keeps the model simple and auditable
 
-#### Alternative: TypeScript-Native Options
+Future: Pluggable entity resolution for fuzzy matching across apps.
+
+---
+
+## Architecture
+
+### Entity Types (Current: Trello)
+
 ```typescript
-// ts-edge - Lightweight, type-safe workflow engine
-import { WorkflowEngine } from 'ts-edge';
-
-const engine = new WorkflowEngine();
-await engine.execute(workflow, initialData);
+type TrelloEntityType = 
+  | 'board'      // Container for lists
+  | 'list'       // Container for cards (e.g., "New Project", "Internal Review")
+  | 'card'       // Work items / tasks
+  | 'member'     // People who perform actions
+  | 'attachment' // Files attached to cards
 ```
 
-- **ts-edge**: https://github.com/cgoinglove/ts-edge
-- **Temporal**: https://temporal.io/ (Enterprise-grade durability)
-- **Restate**: Low-latency durable execution
+### Node Structure
 
-### 📊 Visualization & UI
-
-#### Primary: React Flow + GoJS
-**Why:** Flexible node-based interfaces for graph visualization and workflow building.
-
-- **React Flow**: https://reactflow.dev/ - Node-based UIs
-- **GoJS**: https://gojs.net/latest/ - Interactive diagrams with 200+ samples
-- **Key Features**:
-  - TypeScript support, customizable components
-  - Flowcharts, org charts, mind maps, UML diagrams
-  - Integration with React, Vue, Angular, Svelte
-
-#### Process Mapping: Lucidchart/Draw.io Integration
-- **Use Case**: Business process documentation and mapping
-- **Integration**: Export to programmatic workflow definitions
-
-## Architecture Patterns
-
-### Graph-First Data Model
 ```typescript
-// Entity-Relationship Graph Structure
-interface Node {
+interface EntityNode {
+  // Identity
+  id: string;                    // Format: "{source}:{type}:{sourceId}"
+  entityType: TrelloEntityType;
+  source: 'trello' | 'notion' | 'gmail' | 'google_drive';
+  sourceId: string;              // Original ID from the app
+  
+  // Content
+  label: string;                 // Display name
+  url?: string;                  // Link back to source
+  metadata: Record<string, any>; // App-specific properties
+  
+  // Event tracking (for Hebbian learning)
+  lastSeen: Date;                // Most recent event involving this entity
+  eventCount: number;            // Total events observed
+}
+```
+
+### Edge Types
+
+```typescript
+type EdgeType =
+  // Structural relationships
+  | 'contains'        // Board → List, List → Card
+  | 'has_attachment'  // Card → Attachment
+  
+  // Actor relationships
+  | 'updated_by'      // Entity → Member (who performed action)
+  | 'created_by'      // Entity → Member
+  | 'assigned_to'     // Card → Member
+  
+  // Temporal/Causal (inferred from co-occurring events)
+  | 'preceded_by'     // A typically happens before B
+  | 'triggers'        // A causes B to happen
+  
+  // Semantic (future: AI-derived)
+  | 'similar_to'      // Embedding similarity
+  | 'part_of'         // Concept grouping
+```
+
+### Edge Structure
+
+```typescript
+interface EntityEdge {
   id: string;
-  type: 'person' | 'skill' | 'project' | 'process' | 'knowledge';
-  properties: Record<string, any>;
-  metadata: {
-    created: Date;
-    updated: Date;
-    version: number;
-  };
-}
-
-interface Edge {
-  from: string;
-  to: string;
-  type: 'knows' | 'has_skill' | 'depends_on' | 'implements';
-  weight: number;
-  properties: Record<string, any>;
-}
-
-// TypeScript-safe graph operations
-class GraphStore {
-  async addNode(node: Node): Promise<void> { }
-  async addRelationship(edge: Edge): Promise<void> { }
-  async findPath(from: string, to: string): Promise<Node[]> { }
-  async getNeighbors(nodeId: string, depth: number): Promise<Node[]> { }
+  source: string;      // Node ID
+  target: string;      // Node ID
+  type: EdgeType;
+  
+  // Hebbian learning properties
+  weight: number;      // 0.0 - 1.0, strengthens with use
+  baseWeight: number;  // Decay floor
+  coActivationCount: number;
+  
+  // Metadata
+  lastActivated: Date;
+  context?: string;    // What event created/strengthened this edge
 }
 ```
 
-### Knowledge Management Integration
+---
+
+## Brain-Inspired Learning
+
+### Hebbian Learning ("Neurons that fire together wire together")
+
+When events show entities interacting, strengthen their connection:
+
 ```typescript
-// Semantic Knowledge Graph
-interface KnowledgeNode extends Node {
-  type: 'concept' | 'skill' | 'document' | 'process';
-  embeddings?: number[];
-  tags: string[];
-  confidence: number;
-}
+// When we see: "Olivia moved card X to list Y"
+// We strengthen edges: card→list, member→card
 
-// RAG Integration for AI-Enhanced Knowledge
-interface KnowledgeRetriever {
-  search(query: string): Promise<KnowledgeNode[]>;
-  embed(content: string): Promise<number[]>;
-  similarity(node1: KnowledgeNode, node2: KnowledgeNode): number;
-}
-```
-
-### Workflow Process Mapping
-```typescript
-// Process Definition with Graph Backing
-interface ProcessStep {
-  id: string;
-  name: string;
-  type: 'manual' | 'automated' | 'ai_assisted';
-  dependencies: string[];
-  skills_required: string[];
-  estimated_duration: number;
-}
-
-interface WorkflowDefinition {
-  id: string;
-  name: string;
-  steps: ProcessStep[];
-  graph: {
-    nodes: Node[];
-    edges: Edge[];
-  };
-}
-```
-
-## Enterprise Knowledge Management (2025 Best Practices)
-
-### AI-Powered Knowledge Graphs
-- **Embeddings Integration**: Vector representations for semantic search
-- **RAG Architecture**: Retrieval-Augmented Generation for contextual knowledge
-- **Real-time Updates**: Dynamic knowledge graph evolution
-- **Multi-modal Support**: Text, images, documents, structured data
-
-### Semantic Layers
-Organizations are moving from prototyping to production semantic layers in 2025:
-- AI-assisted search with contextual understanding
-- Intelligent chatbots backed by knowledge graphs
-- Recommendation engines using graph traversal
-- Automated knowledge discovery and tagging
-
-### Performance Metrics
-- **Knowledge Retrieval**: 40% improvement with AI-powered KM tools
-- **Data Organization**: 35% improvement with knowledge graphs
-- **Resolution Time**: 28.6% reduction with personalized knowledge delivery
-- **Profitability**: 25% higher with effective KM systems
-
-## Skills Management System
-
-### Competency Mapping
-```typescript
-interface Skill {
-  id: string;
-  name: string;
-  category: string;
-  level: 'beginner' | 'intermediate' | 'advanced' | 'expert';
-  prerequisites: string[];
-  learning_path: string[];
-  market_demand: number;
-}
-
-interface PersonSkillMapping {
-  person_id: string;
-  skill_id: string;
-  proficiency: number; // 0-100
-  last_assessed: Date;
-  certification?: string;
-}
-```
-
-### Dynamic Learning Pathways
-- Graph-based skill dependency mapping
-- Personalized learning recommendations
-- Real-time skill gap analysis
-- Automated competency assessments
-
-## Implementation Roadmap
-
-### Phase 1: Core Graph Infrastructure
-1. Set up Neo4j with Drivine TypeScript ORM
-2. Define core node/edge types for information entities
-3. Implement basic graph operations and queries
-4. Create REST API for graph interactions
-
-### Phase 2: Workflow Integration
-1. Integrate Windmill for workflow orchestration
-2. Connect workflow steps to graph entities
-3. Build process mapping interface with React Flow
-4. Implement workflow execution tracking
-
-### Phase 3: Knowledge Management
-1. Add vector embeddings for semantic search
-2. Implement RAG system for AI-enhanced knowledge
-3. Build intelligent search and recommendation engine
-4. Create knowledge discovery automation
-
-### Phase 4: Skills Ecosystem
-1. Model skill dependencies and learning paths
-2. Build competency assessment tools
-3. Create personalized development recommendations
-4. Implement skill gap analysis and planning
-
-## Key Dependencies
-
-```json
-{
-  "dependencies": {
-    "neo4j-driver": "^5.0.0",
-    "drivine": "^1.0.0",
-    "@windmill/client": "^1.0.0",
-    "reactflow": "^11.0.0",
-    "gojs": "^3.0.0",
-    "@langchain/core": "^0.3.0",
-    "vector-db": "^1.0.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/neo4j": "^3.0.0"
+function onEventIngested(event: TrelloEvent) {
+  const entities = extractEntities(event);
+  
+  for (const [entityA, entityB] of pairs(entities)) {
+    const edge = findOrCreateEdge(entityA, entityB);
+    
+    // Hebbian update: strengthen connection
+    edge.weight = Math.min(1.0, edge.weight + learningRate * (1 - edge.weight));
+    edge.coActivationCount++;
+    edge.lastActivated = new Date();
   }
 }
 ```
 
-## Resources & References
+### Temporal Decay (Synaptic Pruning)
 
-### Graph Databases
-- [Neo4j Developer Guides](https://neo4j.com/developer/)
-- [Drivine Documentation](https://drivine.org/)
-- [Graph Database Performance Comparison](https://neo4j.com/whitepapers/performance-benchmark/)
+Unused connections weaken over time:
 
-### Workflow Orchestration
-- [Windmill Documentation](https://docs.windmill.dev/)
-- [Temporal TypeScript SDK](https://typescript.temporal.io/)
-- [Awesome Workflow Engines](https://github.com/meirwah/awesome-workflow-engines)
+```typescript
+// Exponential decay: W(t) = W₀ × e^(-λt)
+function decayWeight(edge: EntityEdge, now: Date): number {
+  const timeSinceActivation = now.getTime() - edge.lastActivated.getTime();
+  const lambda = Math.LN2 / HALF_LIFE;
+  return Math.max(edge.baseWeight, edge.weight * Math.exp(-lambda * timeSinceActivation));
+}
+```
 
-### Knowledge Management
-- [Knowledge Graph Best Practices 2025](https://www.pageon.ai/blog/knowledge-graph)
-- [LangChain Graph Integration](https://python.langchain.com/docs/modules/chains/graph)
-- [RAG with Knowledge Graphs](https://blog.langchain.com/rebuilding-chat-langchain/)
+### Pathway Reinforcement
 
-### Visualization
-- [React Flow Documentation](https://reactflow.dev/docs/introduction)
-- [GoJS Samples](https://gojs.net/latest/samples/)
-- [D3.js for Custom Graph Viz](https://d3js.org/)
+When a workflow is deployed from a detected pattern, dramatically strengthen that pathway:
 
-## Market Trends 2025
+```typescript
+function reinforceWorkflowPathway(workflow: Workflow) {
+  for (const edge of workflow.pathwayEdges) {
+    edge.weight = Math.min(1.0, edge.weight * 2.0);
+    edge.baseWeight = Math.min(0.5, edge.baseWeight * 1.5); // More resistant to decay
+  }
+}
+```
 
-1. **AI-Native Knowledge**: Knowledge graphs designed for LLM integration
-2. **Semantic Search**: Vector embeddings and semantic understanding
-3. **Dynamic Workflows**: Self-adapting processes based on outcomes
-4. **Visual Programming**: Low-code workflow building with graph UIs
-5. **Multi-Modal Knowledge**: Integration of text, images, structured data
+---
 
-The information ecosystem should serve as the intelligent backbone of MarketSense, connecting disparate information sources, enabling workflow automation, and providing AI-enhanced knowledge discovery capabilities.
+## Confirmed Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Primary Nodes** | Entities (not events) | Events are signals, information is what matters |
+| **ID Strategy** | Explicit source:type:id mapping | Simple, auditable, no false merges |
+| **Graph Visualization** | React Flow (reactflow ^11.x) | Mature, well-documented, React-native |
+| **Styling** | Plain CSS | Simpler than Tailwind, fewer dependencies |
+| **Framework** | Next.js 14 (App Router) | Modern React, good DX |
+| **Temporal Windows** | Multi-scale (5m, 1h, 1d, 1w) | Captures both rapid and slow workflows |
+| **Entity Matching** | Direct ID matching (MVP) | Start simple, add fuzzy matching later |
+| **Suggestion Rate** | Tunable hyperparameter | User controls noise vs. coverage tradeoff |
+| **Workflow Oversight** | Sandbox → Human Review → Activation | Safety-first automation |
+| **Initial Integrations** | Trello + Notion | Test data available; Gmail later |
+| **Interface Priority** | Visual graph first | See the ecosystem before querying it |
+| **Workflow Format** | n8n JSON schema | Open source, 400+ integrations |
+
+---
+
+## Current Implementation
+
+### Project Structure
+
+```
+marketsense-information-ecosystem/
+├── app/
+│   ├── layout.tsx      # Root layout
+│   ├── page.tsx        # Main page with graph
+│   └── globals.css     # Styling (plain CSS)
+├── components/
+│   └── GraphView.tsx   # React Flow visualization + detail panel
+├── data/
+│   └── mockGraph.ts    # Trello entities from 10 webhook events
+├── docs/
+│   └── research-analysis.md  # This document
+└── package.json
+```
+
+### Dependencies
+
+```json
+{
+  "dependencies": {
+    "next": "^14.2.9",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "reactflow": "^11.11.4"
+  }
+}
+```
+
+### Running the App
+
+```bash
+npm install
+npm run dev
+# Open http://localhost:3000
+```
+
+### Current Features
+
+- ✅ Graph visualization with React Flow
+- ✅ Circular nodes colored by entity type
+- ✅ Dotted canvas background
+- ✅ Click nodes to see detail panel with metadata
+- ✅ Pulse animation on selection
+- ✅ Legend for entity types and relationships
+- ✅ Real Trello data (10 webhook events → 10 entities, 12 edges)
+
+---
+
+## Data Model: Trello Test Data
+
+From 10 Trello webhook events, we extracted:
+
+**Entities:**
+- 1 Board: "Olivia"
+- 2 Lists: "New Project", "Internal Review"  
+- 4 Cards: "C360 Thumbnails", "NY Geo Blog #379/381/384"
+- 1 Member: "Olivia Shorter"
+- 2 Attachments: "Workforce Dev.docx", "Good News.docx"
+
+**Relationships:**
+- Board → Lists (contains)
+- Lists → Cards (current position)
+- Member → Cards (updated_by)
+- Cards → Attachments (has_attachment)
+
+**Events Observed:**
+- `updateCard` (due date added/removed, card moved, position changed)
+- `addAttachmentToCard`
+
+---
+
+## Roadmap
+
+### Phase 1: Core Visualization ✅
+- [x] Next.js app with React Flow
+- [x] Entity nodes from Trello webhook data
+- [x] Detail panel on click
+- [x] Legend and styling
+
+### Phase 2: Notion Integration
+- [ ] Add Notion connector
+- [ ] Parse Notion webhook/API data into entities
+- [ ] Cross-app entity resolution (by user ID)
+
+### Phase 3: Hebbian Learning Engine
+- [ ] Implement edge weight updates on event ingestion
+- [ ] Add temporal decay (configurable half-life)
+- [ ] Visualize edge weight as thickness/opacity
+
+### Phase 4: Pattern Detection
+- [ ] Frequent subgraph mining
+- [ ] Detect repeatable workflows
+- [ ] Confidence scoring
+
+### Phase 5: Workflow Generation
+- [ ] Convert patterns to n8n JSON
+- [ ] Sandbox testing environment
+- [ ] Human review UI
+
+### Phase 6: AI Agent
+- [ ] Natural language queries over graph
+- [ ] LangGraphJS integration
+- [ ] Chat interface
+
+---
+
+## Technology Stack (Full Vision)
+
+| Layer | Technology | Status |
+|-------|------------|--------|
+| **Visualization** | React Flow | ✅ Implemented |
+| **Framework** | Next.js 14 | ✅ Implemented |
+| **Graph Database** | Neo4j | 🔮 Future |
+| **Workflow Engine** | n8n | 🔮 Future |
+| **AI Agent** | LangGraphJS | 🔮 Future |
+| **Vector Embeddings** | OpenAI / local | 🔮 Future |
+
+---
+
+## References
+
+- [React Flow Documentation](https://reactflow.dev/docs)
+- [n8n Workflow JSON Schema](https://docs.n8n.io/)
+- [Neo4j JavaScript Driver](https://neo4j.com/docs/javascript-manual/current/)
+- [LangGraphJS](https://langchain-ai.github.io/langgraphjs/)
+- [Hebbian Learning (Wikipedia)](https://en.wikipedia.org/wiki/Hebbian_theory)

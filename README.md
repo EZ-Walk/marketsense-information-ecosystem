@@ -1,61 +1,90 @@
-# MarketSense Information Ecosystem
+# 🧠 Information Ecosystem
 
-The information ecosystem module manages graph representations, workflows, process mapping, and skill-based knowledge systems for the MarketSense platform.
+A brain-inspired graph system that models information from multiple applications (Trello, Notion, Gmail) as interconnected entities. Uses Hebbian learning to strengthen pathways between frequently co-occurring entities, enabling pattern detection and workflow automation.
 
-## Overview
+## Core Concept
 
-This module provides:
-- Graph-based information representation
-- Workflow and process mapping
-- Skills and knowledge management
-- Information relationship modeling
-- Dynamic ecosystem visualization
+**Entities are nodes. Events are signals.**
 
-## Key Components
+We don't model events as nodes—we model the *information itself*: cards, boards, lists, members, documents. Events (like "card moved" or "attachment added") tell us which entities exist and how they relate, creating and strengthening edges in the graph.
 
-### Graph Representation
-- Node and edge management
-- Relationship modeling
-- Graph traversal algorithms
-- Visualization interfaces
+```
+Events from Trello webhook
+         ↓
+   Extract entities (cards, lists, members, attachments)
+         ↓
+   Create/strengthen edges between co-occurring entities
+         ↓
+   Hebbian learning: frequently connected entities = strong pathways
+         ↓
+   Pattern detection → Workflow automation
+```
 
-### Workflow & Process Mapping
-- Process definition and management
-- Workflow execution engines
-- Process optimization tools
-- Mapping and visualization
+## Current Status
 
-### Skills Ecosystem
-- Skill definition and categorization
-- Competency mapping
-- Knowledge graph integration
-- Adaptive learning pathways
+**MVP Visualization Complete** — Interactive graph showing Trello entities extracted from real webhook data.
 
-## Getting Started
+![Graph Preview](docs/preview.png)
+
+### Features
+- ✅ React Flow graph visualization
+- ✅ Circular nodes colored by entity type (board, list, card, member, attachment)
+- ✅ Click nodes to see metadata in detail panel
+- ✅ Real Trello data (10 events → 10 entities, 12 relationships)
+- ✅ Pulse animation on selection
+- ✅ Legend for entity types and relationships
+
+## Quick Start
 
 ```bash
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
-
-# Run tests
-npm test
+# Open http://localhost:3000
 ```
 
 ## Project Structure
 
 ```
-src/
-├── graph/          # Graph representation and algorithms
-├── workflows/      # Workflow and process mapping
-├── skills/         # Skills and knowledge management
-├── visualization/  # Data visualization components
-├── api/           # API endpoints and services
-└── utils/         # Utility functions
+├── app/
+│   ├── page.tsx        # Main page with graph
+│   └── globals.css     # Styling
+├── components/
+│   └── GraphView.tsx   # React Flow visualization + detail panel
+├── data/
+│   └── mockGraph.ts    # Trello entities from webhook events
+└── docs/
+    └── research-analysis.md  # Full design document
 ```
 
-## Contributing
+## Design Decisions
 
-Please follow the established coding standards and ensure all tests pass before submitting pull requests.
+| Decision | Choice |
+|----------|--------|
+| **Primary Nodes** | Entities (not events) |
+| **ID Strategy** | `source:type:id` — unique ID = unique node |
+| **Graph Library** | React Flow (reactflow ^11.x) |
+| **Framework** | Next.js 14 |
+| **Initial Integrations** | Trello + Notion |
+| **Interface Priority** | Visual graph first, AI agent later |
+
+## Roadmap
+
+1. ✅ **Phase 1:** Core visualization with Trello data
+2. 🔲 **Phase 2:** Notion integration + cross-app entity resolution
+3. 🔲 **Phase 3:** Hebbian learning engine (edge weight updates, decay)
+4. 🔲 **Phase 4:** Pattern detection (frequent subgraph mining)
+5. 🔲 **Phase 5:** Workflow generation (n8n JSON output)
+6. 🔲 **Phase 6:** AI agent for natural language queries
+
+## Documentation
+
+See [docs/research-analysis.md](docs/research-analysis.md) for the full design document including:
+- Entity/edge type definitions
+- Hebbian learning algorithm
+- Temporal decay (synaptic pruning)
+- Pattern detection approach
+- Technology stack rationale
+
+## License
+
+MIT
